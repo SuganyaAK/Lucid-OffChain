@@ -76,52 +76,134 @@ test("emulator test",async() => {
   //  const txhash = await signedTx.submit();
 
 test("Alice sells NFT, Bob buys NFT", async () => {
-  const alice = await generateAccountSeedPhrase ({lovelace : 5_000_000n});
-  const bobby = await generateAccountSeedPhrase ({lovelace : 10_000_000n});
+  const policyid = "07228dfb8c387a58df42870908f22bd97c8fbe07cae9776a63be2105";
+  const myToken = fromText ("myNFTToken");
+  const unit = policyid + myToken;
+
+  const alice = await generateAccountSeedPhrase ({lovelace : 10_000_000n});
+  const bobby = await generateAccountSeedPhrase ({lovelace : 20_000_000n,[unit]:1n});
+  //const charles = await generateAccountSeedPhrase ({lovelace : 20_000_000n});
+
   const emulator = new Emulator([alice,bobby]);
   const lucid = Lucid.new(emulator);
   (await lucid).selectWalletFromSeed(alice.seedPhrase);
+  console.log("Alice wallet before transfer:",await (await lucid).wallet.getUtxos());
   (await lucid).selectWalletFromSeed(bobby.seedPhrase);
+  console.log("Bobby wallet before transfer:",await (await lucid).wallet.getUtxos());
+  emulator.awaitBlock(10);
+
   const marketplace : Script = { 
     type: "PlutusV2",
     script: script.cborHex,
   };
   const marketplaceaddr = (await lucid).utils.validatorToAddress(marketplace);
-  console.log(marketplaceaddr);
+  console.log("Marketplace Address:",marketplaceaddr);
   const datum = Data.to({sellerAddress : fromAddress (alice.address),priceOfAsset : 5_000_000n},SimpleSale)
-  console.log(datum);
+  console.log("Simplesale datum:",datum);
   // Alice locks 1_000_000 lovelace at the script address
-  const lockNFT =  (await lucid)
-    .newTx()
-    .payToContract(marketplaceaddr,datum,{lovelace : 1_000_000n})
-    .complete();
-  //console.log (lockNFT);
-  const signedTx = (await lockNFT).sign().complete();
-  const locktxhash =(await signedTx).submit();
-  console.log (await locktxhash);
 
   emulator.awaitBlock(10);
+  const lockNFT =  (await lucid)
+    .newTx()
+    .payToContract(marketplaceaddr,datum,{[unit] : 1n})
+    .complete();
+  const signedTx = (await lockNFT).sign().complete();
+  const locktxhash =(await signedTx).submit();
 
-  const bobpicksutxo = await (await lucid).utxosAt(marketplaceaddr);
-  console.log(bobpicksutxo);
+  console.log ("Txn hash:",await locktxhash);
+
+  emulator.awaitBlock(10);
+  const datumSample = Data.from(datum, SimpleSale);
+  const selleraddrSc = datumSample.sellerAddress;
+  const priceAsset = datumSample.priceOfAsset;
+  const selleraddrBech = toAddress(selleraddrSc,await lucid);
   const BuyRedeemer = Data.to("PBuy",MarketRedeemer);
   const WithdrawRedeemer = Data.to("PWithdraw",MarketRedeemer);
 
-  const rawdatumCBOR =
-  //"d8799fd8799fd8799f581cad2eac5b83ee132d92f33fefc9cfc265430db6fc4a001110c7407995ffd8799fd8799fd8799f581c09a3a2c68cc405fc5656a77eb89460a91f24a775c86ba8039ea70b75ffffffff1a004c4b40ff";
-  "d8799fd8799fd8799f581cee52c61a6500b0b9bde593344465592b8a80858a171409e9361942e6ffd8799fd8799fd8799f581cd147ddfa0ec53d130c7190f619aff5f98d503948a011a519f3bb5a2affffffff1a004c4b40ff"
-  const datumSample = Data.from(rawdatumCBOR, SimpleSale);
-  const selleraddrSc = datumSample.sellerAddress;
-  const selleraddrBech = toAddress(selleraddrSc,await lucid);
+  const bobpicksutxo = await (await lucid).utxosAt(marketplaceaddr);
+  console.log("UTxo at contract addr;",bobpicksutxo);
+  const collectNft = (await lucid).newTx().collectFrom(bobpicksutxo,BuyRedeemer)
+                     .attachSpendingValidator(marketplace)
+                     .payToAddress(alice.address,{lovelace :priceAsset})
+                     .complete();
 
-  const collectNft = (await lucid).newTx().collectFrom(bobpicksutxo,BuyRedeemer).attachWithdrawalValidator(marketplace)
-                     .payToAddress(selleraddrBech,{lovelace: 6_000_000n});
+  const signedcollectTx = (await collectNft).sign().complete();
+  const collecttxhash =(await signedcollectTx).submit();
   
   emulator.awaitBlock(10);
+
   (await lucid).selectWalletFromSeed(alice.seedPhrase);
   console.log ("Alice balance:",await (await lucid).wallet.getUtxos());
   (await lucid).selectWalletFromSeed(bobby.seedPhrase);
   console.log ("bobby balance:",await (await lucid).wallet.getUtxos());
-  
-
 });
+
+// Withdraw NFT
+
+test("Alice sells NFT, Bob withdraws NFT", async () => {
+  const policyid = "07228dfb8c387a58df42870908f22bd97c8fbe07cae9776a63be2105";
+  const myToken = fromText ("myNFTToken");
+  const unit = policyid + myToken;
+
+  const alice = await generateAccountSeedPhrase ({lovelace : 10_000_000n});
+  const bobby = await generateAccountSeedPhrase ({lovelace : 20_000_000n,[unit]:1n});
+  //const charles = await generateAccountSeedPhrase ({lovelace : 20_000_000n});
+
+  const emulator = new Emulator([alice,bobby]);
+  const lucid = Lucid.new(emulator);
+  (await lucid).selectWalletFromSeed(alice.seedPhrase);
+  console.log("Alice wallet before transfer:",await (await lucid).wallet.getUtxos());
+  (await lucid).selectWalletFromSeed(bobby.seedPhrase);
+  console.log("Bobby wallet before transfer:",await (await lucid).wallet.getUtxos());
+  emulator.awaitBlock(10);
+
+  const marketplace : Script = { 
+    type: "PlutusV2",
+    script: script.cborHex,
+  };
+  const marketplaceaddr = (await lucid).utils.validatorToAddress(marketplace);
+  console.log("Marketplace Address:",marketplaceaddr);
+  const datum = Data.to({sellerAddress : fromAddress (alice.address),priceOfAsset : 5_000_000n},SimpleSale)
+  console.log("Simplesale datum:",datum);
+  // Alice locks 1_000_000 lovelace at the script address
+
+  emulator.awaitBlock(10);
+  const lockNFT =  (await lucid)
+    .newTx()
+    .payToContract(marketplaceaddr,datum,{[unit] : 1n})
+    .complete();
+  const signedTx = (await lockNFT).sign().complete();
+  const locktxhash =(await signedTx).submit();
+
+  console.log ("Txn hash:",await locktxhash);
+
+  emulator.awaitBlock(10);
+
+  const datumSample = Data.from(datum, SimpleSale);
+  const selleraddrSc = datumSample.sellerAddress;
+  const selleraddrBech = toAddress(selleraddrSc,await lucid);
+  const WithdrawRedeemer = Data.to("PWithdraw",MarketRedeemer);
+
+  const bobpicksutxo = (await lucid).utxosAtWithUnit(marketplaceaddr,unit);
+  //await (await lucid).(marketplaceaddr);
+  console.log("UTxo at contract addr;",bobpicksutxo);
+
+  const tx = (await lucid).newTx()
+                     .collectFrom(await bobpicksutxo,WithdrawRedeemer)
+                     .attachSpendingValidator(marketplace)
+                     .addSigner(alice.address)
+                     .complete();
+  console.log ("withdrawnft:",await tx);
+  const signedwithdrawTx = await (await tx).sign().complete();
+  const txhash = signedwithdrawTx.submit();
+
+  emulator.awaitBlock(10);
+
+ // (await lucid).selectWalletFromSeed(alice.seedPhrase);
+ // console.log ("Alice balance:",await (await lucid).wallet.getUtxos());
+ // (await lucid).selectWalletFromSeed(bobby.seedPhrase);
+ // console.log ("bobby balance:",await (await lucid).wallet.getUtxos());
+});
+
+
+
